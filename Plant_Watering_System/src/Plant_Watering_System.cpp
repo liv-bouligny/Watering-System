@@ -1,3 +1,9 @@
+/******************************************************/
+//       THIS IS A GENERATED FILE - DO NOT EDIT       //
+/******************************************************/
+
+#include "Particle.h"
+#line 1 "c:/Users/Jason.000/Documents/IoT/Watering-System/Plant_Watering_System/src/Plant_Watering_System.ino"
 /*
  * Project Plant_Watering_System
  * Description: Water a plant based on input from a moisture sensor 
@@ -13,6 +19,13 @@
 #include "Adafruit_SSD1306.h"
 #include "Adafruit_BME280.h"
 #include "Grove_Air_quality_Sensor.h"
+void setup();
+void loop();
+void MQTT_connect();
+void envCheck ();
+void moistCheck ();
+void displayEnvironment();
+#line 16 "c:/Users/Jason.000/Documents/IoT/Watering-System/Plant_Watering_System/src/Plant_Watering_System.ino"
 const int OLEDADD = 0x3C;
 const int BMEADD = 0x76;
 const int OLED_RESET = 20;
