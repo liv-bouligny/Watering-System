@@ -15,7 +15,7 @@
 #include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h"
 TCPClient TheClient;
 Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
-Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (&mqtt,AIO_USERNAME "/feeds/wsbutton");
+Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe(&mqtt,AIO_USERNAME "/feeds/wsbutton");
 Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
 Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
 Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
@@ -32,7 +32,7 @@ const int PUMPPIN = 10;
 const char degree = 0xF8;
 unsigned long currentTime, duration;
 unsigned long lowpulseoccupancy = 0;
-unsigned long sampleTime_ms = 30000;
+unsigned long sampleTime_ms = 300000;
 float ratio = 0;
 float concentration = 0;
 int last, lastDust, moist, moistP, quality, currentM, currentS, lastM;
@@ -82,19 +82,10 @@ void setup() {
   envCheck();
   displayEnvironment();       
   lastDust = millis();
-  mqtt.subscribe (&mqttButton);
+  mqtt.subscribe(&mqttButton);
 }
 
-void loop() {  
-  MQTT_connect();
-  if ((millis()-last)>120000) {                     //MQTT Ping
-    Serial.printf("Pinging MQTT \n");
-    if(! mqtt.ping()) {
-      Serial.printf("Disconnecting \n");
-      mqtt.disconnect();
-    }
-    last = millis();
-  }
+void loop() {    
   duration = pulseIn(DUSTPIN, LOW);                 //Dust sensor duration of particle interference
   lowpulseoccupancy = lowpulseoccupancy+duration;   //Dust sensor LPO Calculation   
   currentTime = millis();
@@ -111,9 +102,9 @@ void loop() {
     Serial.printf("Pressure: %0.02f inHG\nHumidity: %0.02f\nDust:%0.02f\nAir Quality: %i\n",pressHG,humidRH,concentration,quality);;
     lastDust = millis();
   }  
-  
+  MQTT_connect();
   Adafruit_MQTT_Subscribe *subscription;
-  while ((subscription = mqtt.readSubscription(200))) {
+  while ((subscription = mqtt.readSubscription(1000))) {
     if (subscription == &mqttButton) {              //Button input from dashboard (insert manual pump operation)
       buttonState = atoi((char *)mqttButton.lastread);
       Serial.printf("Received %i from Adafruit.io feed Argon LED Button \n",buttonState);
@@ -126,7 +117,14 @@ void loop() {
   else {
     digitalWrite (D7, LOW);
   }
-  
+  if ((millis()-last)>120000) {                     //MQTT Ping
+    Serial.printf("Pinging MQTT \n");
+    if(! mqtt.ping()) {
+      Serial.printf("Disconnecting \n");
+      mqtt.disconnect();
+    }
+    last = millis();
+  }
   if (currentM == 0) {                              //Every 30 min (on the hour and half hour)   
     if (currentS <= 1) {                            //check moisture and water plant if needed
       moistCheck();                                 //and update OLED Display every 15 min
