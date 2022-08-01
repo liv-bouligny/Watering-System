@@ -27,6 +27,15 @@ void moistCheck ();
 void displayEnvironment();
 void manualPump ();
 #line 16 "c:/Users/Jason.000/Documents/IoT/Watering-System/Plant_Watering_System/src/Plant_Watering_System.ino"
+TCPClient TheClient;
+Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
+Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (&mqtt,AIO_USERNAME "/feeds/wsbutton");
+Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
+Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
+Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
+Adafruit_MQTT_Publish mqttHumid = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSHumidity");
+Adafruit_MQTT_Publish mqttDust = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSDust");
+Adafruit_MQTT_Publish mqttAQ = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSAirQuality");
 const int OLEDADD = 0x3C;
 const int BMEADD = 0x76;
 const int OLED_RESET = 20;
@@ -44,23 +53,30 @@ int last, lastDust, moist, moistP, quality, currentM, currentS, lastM;
 float tempC, tempF, pressPA, pressHG, humidRH;
 bool status,buttonState;
 bool onState = LOW;
-bool lastState = LOW;
-String DateTime , TimeOnly;
-TCPClient TheClient;
-Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
-Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (& mqtt , AIO_USERNAME "/feeds/WSButton");
-Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
-Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
-Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
-Adafruit_MQTT_Publish mqttHumid = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSHumidity");
-Adafruit_MQTT_Publish mqttDust = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSDust");
-Adafruit_MQTT_Publish mqttAQ = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSAirQuality");
+bool lastState = HIGH;
 Adafruit_SSD1306 display(OLED_RESET);
 Adafruit_BME280 bme;
 AirQualitySensor sensor(A0);
 
 void setup() {
-  Serial.begin(9600);    
+  Serial.begin(9600);   
+  waitFor(Serial.isConnected,15000);
+  if (status == false)  {                         //Check BME Status
+    display.printf("BME280 at address 0x%02X failed to initialize\n", BMEADD);
+    display.display();
+  } 
+  Serial.printf("Waiting for AQ sensor to init...\n");
+  delay(5000);   
+  if (sensor.init()) {                            //initialize Air Quality Sensor
+    Serial.printf("Sensor ready.\n");
+  }
+  else {
+    Serial.printf("Sensor ERROR!\n");
+  }  
+  WiFi.connect();
+  while(WiFi.connecting()) {                      //Wait for argon to connect to wifi
+    Serial.printf(".");
+  }
   display.begin(SSD1306_SWITCHCAPVCC, OLEDADD); 
   status = bme.begin(BMEADD);
   Time.zone ( -6);
@@ -72,37 +88,20 @@ void setup() {
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0,0);
-  if (status == false)  {    
-    display.printf("BME280 at address 0x%02X failed to initialize\n", BMEADD);
-    display.display();
-  } 
-  Serial.printf("Waiting for AQ sensor to init...\n");
-  delay(20000);   
-  if (sensor.init()) {
-    Serial.printf("Sensor ready.\n");
-  }
-  else {
-    Serial.printf("Sensor ERROR!\n");
-  }  
   pinMode(SOILPIN, INPUT);
   pinMode(DUSTPIN, INPUT);
   pinMode(AQPIN, INPUT);
   pinMode(PUMPPIN, OUTPUT);
   pinMode(D7,OUTPUT);
   envCheck();
-  displayEnvironment();
+  displayEnvironment();       
+  lastDust = millis();
   mqtt.subscribe (&mqttButton);
-  WiFi.connect();
-  while(WiFi.connecting()) {
-    Serial.printf(".");
-  }   
-  lastDust = millis();   
-  SYSTEM_MODE(SEMI_AUTOMATIC);
 }
 
 void loop() {  
   MQTT_connect();
-  if ((millis()-last)>120000) {
+  if ((millis()-last)>120000) {                     //MQTT Ping
     Serial.printf("Pinging MQTT \n");
     if(! mqtt.ping()) {
       Serial.printf("Disconnecting \n");
@@ -134,16 +133,10 @@ void loop() {
       Serial.printf("Received %i from Adafruit.io feed Argon LED Button \n",buttonState);
     }
   }
-  if (buttonState != lastState) {
-    if (buttonState == HIGH)  {
-      onState = !onState;      
-    }
-    lastState = buttonState;
-    Serial.printf("On State: %i\nlastState:%i\nbuttonState:%i\n",onState,lastState,buttonState);
-  }
-  if (onState == HIGH)  {
-    digitalWrite (D7, HIGH); 
-  }
+  if (buttonState) {
+    Serial.printf("buttonState:%i\n",buttonState);
+    digitalWrite (D7, HIGH);
+  }  
   else {
     digitalWrite (D7, LOW);
   }
@@ -198,14 +191,14 @@ void envCheck ()  {
   tempC = bme.readTemperature();                  //BME Temp reading
   tempF = (map(tempC,0.0,100.0,32.0,212.0));      //BME Temp conversion C to F      
   pressPA = bme.readPressure();                   //BME Pressure reading
-  pressHG = (map(pressPA,0.0,3386.39,0.0,1.0));   //BME Pressure conversion PA to inHG      
+  pressHG = (map(pressPA,0.0,3386.39,0.0,1.0)+5); //BME Pressure conversion PA to inHG      
   humidRH = bme.readHumidity();                   //BME Humidity reading  
   quality = sensor.slope();
   for (i=0;i<5;i++) {
     digitalWrite(D7,HIGH);
-    delay(100);
+    delay(50);
     digitalWrite(D7,LOW);
-    delay(100);
+    delay(50);
   }
 }
 
