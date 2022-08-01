@@ -21,39 +21,40 @@
 #include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h"
 void setup();
 void loop();
+void MQTT_connect();
 void envCheck ();
 void moistCheck ();
 void displayEnvironment();
+void manualPump ();
 #line 16 "c:/Users/Jason.000/Documents/IoT/Watering-System/Plant_Watering_System/src/Plant_Watering_System.ino"
 const int OLEDADD = 0x3C;
 const int BMEADD = 0x76;
 const int OLED_RESET = 20;
 const int SOILPIN = 14;
-const int DUSTPIN = 2;
-const int AQPIN = 19;
+const int DUSTPIN = A1;
+const int AQPIN = A0;
 const int PUMPPIN = 10;
 const char degree = 0xF8;
 unsigned long currentTime, duration;
 unsigned long lowpulseoccupancy = 0;
-unsigned long sampleTime_ms = 300000;
+unsigned long sampleTime_ms = 30000;
 float ratio = 0;
 float concentration = 0;
-int last, moist, moistP, quality, currentM, currentS, lastM;
+int last, lastDust, moist, moistP, quality, currentM, currentS, lastM;
 float tempC, tempF, pressPA, pressHG, humidRH;
-bool status;
+bool status,buttonState,onState,lastState;
 String DateTime , TimeOnly;
-// TCPClient TheClient;
-// Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
-// Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (& mqtt , AIO_USERNAME "/feeds/WSButton");
-// Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
-// Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
-// Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
-// Adafruit_MQTT_Publish mqttDust = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSDust");
-// Adafruit_MQTT_Publish mqttAQ = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSAirQuality");
+TCPClient TheClient;
+Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
+Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (& mqtt , AIO_USERNAME "/feeds/WSButton");
+Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
+Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
+Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
+Adafruit_MQTT_Publish mqttDust = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSDust");
+Adafruit_MQTT_Publish mqttAQ = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSAirQuality");
 Adafruit_SSD1306 display(OLED_RESET);
 Adafruit_BME280 bme;
 AirQualitySensor sensor(A0);
- SYSTEM_MODE(SEMI_AUTOMATIC);
 
 void setup() {
   Serial.begin(9600);    
@@ -71,7 +72,9 @@ void setup() {
   if (status == false)  {    
     display.printf("BME280 at address 0x%02X failed to initialize\n", BMEADD);
     display.display();
-  }    
+  } 
+  Serial.printf("Waiting for AQ sensor to init...\n");
+  delay(20000);   
   if (sensor.init()) {
     Serial.printf("Sensor ready.\n");
   }
@@ -85,38 +88,58 @@ void setup() {
   pinMode(D7,OUTPUT);
   envCheck();
   displayEnvironment();
-  // mqtt.subscribe (&mqttButton);
-  // WiFi.connect();
-  // while(WiFi.connecting()) {
-  //   Serial.printf(".");
-  // }      
+  mqtt.subscribe (&mqttButton);
+  WiFi.connect();
+  while(WiFi.connecting()) {
+    Serial.printf(".");
+  }   
+  lastDust = millis();   
 }
 
 void loop() {  
-  // MQTT_connect();
-  // if ((millis()-last)>120000) {
-  //   Serial.printf("Pinging MQTT \n");
-  //   if(! mqtt.ping()) {
-  //     Serial.printf("Disconnecting \n");
-  //     mqtt.disconnect();
-  //   }
-  //   last = millis();
-  // }
-  // Adafruit_MQTT_Subscribe *subscription;
-  // while ((subscription = mqtt.readSubscription(500))) {
-  //   if (subscription == &mqttButton) {
-  //                                                   //Button input from dashboard (insert manual pump operation)
-  //   }
-  // }
+  MQTT_connect();
+  if ((millis()-last)>120000) {
+    Serial.printf("Pinging MQTT \n");
+    if(! mqtt.ping()) {
+      Serial.printf("Disconnecting \n");
+      mqtt.disconnect();
+    }
+    last = millis();
+  }
   duration = pulseIn(DUSTPIN, LOW);                 //Dust sensor duration of particle interference
-  lowpulseoccupancy = lowpulseoccupancy+duration;   //Dust sensor LPO Calculation  
+  lowpulseoccupancy = lowpulseoccupancy+duration;   //Dust sensor LPO Calculation   
   currentTime = millis();
   currentM = Time.minute();
   currentS = Time.second();
-  if ((currentTime - last) > sampleTime_ms) {       //update sensor values every 5 mins/publish to adafruit
+  if ((millis() - lastDust) > sampleTime_ms) {       //update sensor values every 5 mins/publish to adafruit
+    ratio = lowpulseoccupancy/(sampleTime_ms*10.0); // Dust Sensor Integer percentage 0=>100
+    concentration = 1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62; // Dust particle concentration using spec sheet curve
+    lowpulseoccupancy = 0;
     envCheck();    
-    last = millis();
+    lastDust = millis();
   }  
+  
+  Adafruit_MQTT_Subscribe *subscription;
+  while ((subscription = mqtt.readSubscription(200))) {
+    if (subscription == &mqttButton) {              //Button input from dashboard (insert manual pump operation)
+      buttonState = atoi((char *)mqttButton.lastread);
+      Serial.printf("Received %i from Adafruit.io feed Argon LED Button \n",buttonState);
+    }
+  }
+  if (buttonState != lastState) {
+    if (buttonState == HIGH)  {
+      onState = !onState;      
+    }
+    lastState = buttonState;
+    Serial.printf("On State: %i\nlastState:%i\nbutton1:%i\n",onState,lastState,buttonState);
+  }
+  if (onState == HIGH)  {
+    digitalWrite (D7, HIGH); 
+  }
+  else {
+    digitalWrite (D7, LOW);
+  }
+  
   if (currentM == 0) {                              //Every 30 min (on the hour and half hour)   
     if (currentS <= 1) {                            //check moisture and water plant if needed
       moistCheck();                                 //and update OLED Display every 15 min
@@ -141,24 +164,24 @@ void loop() {
   }  
 }
 
-// void MQTT_connect() {
-//   int8_t ret;
+void MQTT_connect() {
+  int8_t ret;
  
-//   // Stop if already connected.
-//   if (mqtt.connected()) {
-//     return;
-//   }
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
  
-//   Serial.print("Connecting to MQTT... ");
+  Serial.print("Connecting to MQTT... ");
  
-//   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
-//     Serial.printf("%s\n",(char *)mqtt.connectErrorString(ret));
-//     Serial.printf("Retrying MQTT connection in 5 seconds..\n");
-//     mqtt.disconnect();
-//     delay(5000);  // wait 5 seconds
-//   }
-//   Serial.printf("MQTT Connected!\n");
-// }
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+    Serial.printf("%s\n",(char *)mqtt.connectErrorString(ret));
+    Serial.printf("Retrying MQTT connection in 5 seconds..\n");
+    mqtt.disconnect();
+    delay(5000);  // wait 5 seconds
+  }
+  Serial.printf("MQTT Connected!\n");
+}
 
 void envCheck ()  {    
   int i;  
@@ -168,9 +191,7 @@ void envCheck ()  {
   tempF = (map(tempC,0.0,100.0,32.0,212.0));      //BME Temp conversion C to F      
   pressPA = bme.readPressure();                   //BME Pressure reading
   pressHG = (map(pressPA,0.0,3386.39,0.0,1.0));   //BME Pressure conversion PA to inHG      
-  humidRH = bme.readHumidity();                   //BME Humidity reading
-  ratio = lowpulseoccupancy/(sampleTime_ms*10.0); // Dust Sensor Integer percentage 0=>100
-  concentration = 1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62; // Dust particle concentration using spec sheet curve
+  humidRH = bme.readHumidity();                   //BME Humidity reading  
   quality = sensor.slope();
   for (i=0;i<5;i++) {
     digitalWrite(D7,HIGH);
@@ -214,13 +235,13 @@ void moistCheck () {                              //check moisture and activate 
 }
 
 void displayEnvironment()  {
-  // if (mqtt.Update())  {
-  //   mqttMoist.publish(moist);
-  //   mqttTemp.publish(tempF);
-  //   mqttPress.publish(pressHG);
-  //   mqttDust.publish(concentration);
-  //   mqttAQ.publish(quality);
-  // }  
+  if (mqtt.Update())  {
+    mqttMoist.publish(moist);
+    mqttTemp.publish(tempF);
+    mqttPress.publish(pressHG);
+    mqttDust.publish(concentration);
+    mqttAQ.publish(quality);
+  }  
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -228,5 +249,20 @@ void displayEnvironment()  {
   display.printf("Date: %i/%i/%i\nTime: %i:%02i\n",Time.month(),Time.day(),Time.year(),Time.hour(),Time.minute());
   display.printf("Moisture: %i %i%%\nTemp: %0.01f%cC, %0.01f%cF\n",moist,moistP,tempC,degree,tempF,degree);
   display.printf("Pressure: %0.02f inHG\nDust:%0.02f\nAir Quality: %i",pressHG,concentration,quality);
+  display.display();
+}
+
+void manualPump () {
+  display.clearDisplay();      
+  display.setCursor(0,0);
+  display.printf("Engaging Water Pump...\n");
+  display.display();
+  delay (800);
+  digitalWrite (PUMPPIN, HIGH);
+  delay(250);
+  digitalWrite (PUMPPIN,LOW); 
+  display.clearDisplay();      
+  display.setCursor(0,0);
+  display.printf("Watering complete!\n");
   display.display();
 }

@@ -4,5 +4,6 @@
     "files.associations": {
         "*.ino": "cpp"
     },
-    "particle.targetDevice": "Persephone"
+    "particle.targetDevice": "Persephone",
+    "particle.firmwareVersion": "2.3.0"
 }
