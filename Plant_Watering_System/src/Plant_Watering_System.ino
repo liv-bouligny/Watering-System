@@ -28,7 +28,9 @@ float ratio = 0;
 float concentration = 0;
 int last, lastDust, moist, moistP, quality, currentM, currentS, lastM;
 float tempC, tempF, pressPA, pressHG, humidRH;
-bool status,buttonState,onState,lastState;
+bool status,buttonState;
+bool onState = LOW;
+bool lastState = LOW;
 String DateTime , TimeOnly;
 TCPClient TheClient;
 Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
@@ -36,6 +38,7 @@ Adafruit_MQTT_Subscribe mqttButton = Adafruit_MQTT_Subscribe (& mqtt , AIO_USERN
 Adafruit_MQTT_Publish mqttMoist = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSMoisture");
 Adafruit_MQTT_Publish mqttTemp = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSTemp");
 Adafruit_MQTT_Publish mqttPress = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSPressure");
+Adafruit_MQTT_Publish mqttHumid = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSHumidity");
 Adafruit_MQTT_Publish mqttDust = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSDust");
 Adafruit_MQTT_Publish mqttAQ = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/WSAirQuality");
 Adafruit_SSD1306 display(OLED_RESET);
@@ -80,6 +83,7 @@ void setup() {
     Serial.printf(".");
   }   
   lastDust = millis();   
+  SYSTEM_MODE(SEMI_AUTOMATIC);
 }
 
 void loop() {  
@@ -102,9 +106,10 @@ void loop() {
     concentration = 1.1*pow(ratio,3)-3.8*pow(ratio,2)+520*ratio+0.62; // Dust particle concentration using spec sheet curve
     lowpulseoccupancy = 0;
     envCheck();    
+    displayEnvironment();
     Serial.printf("Date: %i/%i/%i\nTime: %i:%02i\n",Time.month(),Time.day(),Time.year(),Time.hour(),Time.minute());
     Serial.printf("Moisture: %i %i%%\nTemp: %0.01f%cC, %0.01f%cF\n",moist,moistP,tempC,degree,tempF,degree);
-    Serial.printf("Pressure: %0.02f inHG\nDust:%0.02f\nAir Quality: %i",pressHG,concentration,quality);
+    Serial.printf("Pressure: %0.02f inHG\nHumidity: %0.02f\nDust:%0.02f\nAir Quality: %i\n",pressHG,humidRH,concentration,quality);;
     lastDust = millis();
   }  
   
@@ -120,7 +125,7 @@ void loop() {
       onState = !onState;      
     }
     lastState = buttonState;
-    Serial.printf("On State: %i\nlastState:%i\nbutton1:%i\n",onState,lastState,buttonState);
+    Serial.printf("On State: %i\nlastState:%i\nbuttonState:%i\n",onState,lastState,buttonState);
   }
   if (onState == HIGH)  {
     digitalWrite (D7, HIGH); 
@@ -225,9 +230,10 @@ void moistCheck () {                              //check moisture and activate 
 
 void displayEnvironment()  {
   if (mqtt.Update())  {
-    mqttMoist.publish(moist);
+    mqttMoist.publish(moistP);
     mqttTemp.publish(tempF);
     mqttPress.publish(pressHG);
+    mqttPress.publish(humidRH);
     mqttDust.publish(concentration);
     mqttAQ.publish(quality);
   }  
@@ -237,7 +243,7 @@ void displayEnvironment()  {
   display.setCursor(0,0);
   display.printf("Date: %i/%i/%i\nTime: %i:%02i\n",Time.month(),Time.day(),Time.year(),Time.hour(),Time.minute());
   display.printf("Moisture: %i %i%%\nTemp: %0.01f%cC, %0.01f%cF\n",moist,moistP,tempC,degree,tempF,degree);
-  display.printf("Pressure: %0.02f inHG\nDust:%0.02f\nAir Quality: %i",pressHG,concentration,quality);
+  display.printf("Pressure: %0.02f inHG\nHumidity: %0.02f\nDust:%0.02f\nAir Quality: %i\n",pressHG,humidRH,concentration,quality);
   display.display();
 }
 
